@@ -251,6 +251,7 @@
   .dep-edit .text-input, .dep-edit .num-input, .dep-edit select{width:100%; max-width:none; min-width:0;}
   .dep-edit .num-input{text-align:right;}
   .de-act{display:flex; justify-content:flex-end; align-items:center; gap:8px;}
+  .pdf-banner{border:1.5px solid var(--accent); display:flex; flex-direction:column; gap:4px; font-size:13.5px;} .pdf-banner span{color:var(--ink-2); font-size:12.5px;}
   .dl-row{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;} .dl-row .dl-bilan{margin-top:0;}
   .dl-pdf{background:var(--accent); color:#fff; border-color:transparent; padding:6px 12px; font-size:12.5px;}
   .budget-switch{margin-bottom:14px;} .budget-switch .seg{display:flex; width:100%;} .budget-switch .seg button{flex:1 1 0; padding:8px 6px;}
@@ -515,10 +516,22 @@ if(ok){
 }
 function download(name, data, type){
   var ext = String(name||'').split('.').pop().toLowerCase();
-  var blob = new Blob([data], {type: type || ({pdf:'application/pdf', json:'application/json'}[ext]) || 'text/html'});
-  var url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url; a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  var mime = type || ({pdf:'application/pdf', json:'application/json'}[ext]) || 'text/html';
+  var blob = new Blob([data], {type: mime});
+  function viaLien(){
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  }
+  /* iPhone / iPad : la feuille de partage propose « Enregistrer dans Fichiers » */
+  var ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  try{
+    var f = new File([blob], name, {type: mime});
+    if(ios && navigator.canShare && navigator.canShare({files:[f]})){
+      return navigator.share({files:[f], title:name}).catch(function(e){ if(!e || e.name!=='AbortError') viaLien(); });
+    }
+  }catch(e){}
+  viaLien();
 }
 window.claude = { use: function(name){
   if(name==='db') return fdb ? Promise.resolve(fdb) : Promise.reject(new Error('firebase indisponible'));
@@ -574,6 +587,8 @@ function boot(){
     /* vérifie l'accès (règles Firestore) avant de lancer l'appli */
     fdb.doc('config/main').get().then(function(){
       started = true; window.__startApp();
+      /* outils PDF chargés d'avance : l'export devient instantané (utile pour le partage sur iPhone) */
+      setTimeout(function(){ try{ if(window.chargerPdfLibs) chargerPdfLibs().catch(function(){}); }catch(e){} }, 2500);
     }).catch(function(err){
       if(err && err.code==='permission-denied'){
         auth.signOut();
@@ -1518,14 +1533,23 @@ function prelevementsCard(){
 
 /* ================= PAGE 2 — BILAN ================= */
 function pageBilan(){
-  return bilanCard() + repartitionCard() + paretoCard() + renderHistoryCard() + compteFbCard();
+  return pdfMoisCard() + bilanCard() + repartitionCard() + paretoCard() + renderHistoryCard() + compteFbCard();
+}
+/* Juste après une clôture : le PDF du mois en un toucher, pour le ranger dans un dossier « Budget » */
+function pdfMoisCard(){
+  if(!state.justClosed || !state.dl) return '';
+  var m = state.history.find(function(x){ return x._id===state.justClosed; });
+  if(!m) return '';
+  return '<div class="card pdf-banner"><div><b>📦 '+escHtml(m.label||m._id)+' est clôturé.</b><br><span>Gardez son bilan dans votre dossier Budget.</span></div>'+
+    '<div class="dl-row"><button class="btn-mini dl-bilan dl-pdf" data-dlpdf="'+escapeAttr(m._id)+'">📄 Télécharger le PDF</button><button class="btn-mini" id="pdfBannerX">Plus tard</button></div></div>';
 }
 
 function compteFbCard(){
   var u = window.__fbUser;
   return '<div class="card"><h3>👤 Compte</h3>'+
     '<p class="pareto-sub">Connecté : <b>'+escHtml(u && u.email || '')+'</b>. Vos données sont dans votre base Firebase, accessibles seulement à vos deux comptes.</p>'+
-    '<div class="tf-row" style="margin-top:10px;"><button class="btn btn-ghost" id="fbExport">⬇️ Sauvegarde (.json)</button><button class="btn btn-ghost" id="fbLogout">Se déconnecter</button></div>'+
+    '<p class="pareto-sub">📄 Vos bilans lisibles (PDF) se téléchargent plus haut, dans « Bilans de fin de mois ». La copie de secours ci-dessous sert seulement à restaurer l\'appli en cas de problème.</p>'+
+    '<div class="tf-row" style="margin-top:10px;"><button class="btn btn-ghost" id="fbExport">🛟 Copie de secours</button><button class="btn btn-ghost" id="fbLogout">Se déconnecter</button></div>'+
     '<p class="hint-line" id="fbExportMsg"></p></div>';
 }
 /* ---------- où va l'argent : prévu, réel et cible (règle 50/30/20) ---------- */
@@ -2450,7 +2474,8 @@ function doCloseMonth(){
     d.monthLabel = labelFromKey(nk);
     state.confirmClose = false;
     persist(true, ['report','revenus','lignes','epargnes','monthLabel','moisCle']);
-    toast('📦 '+escHtml(archive.label)+' clôturé — son bilan est enregistré dans l\'onglet Bilan, en bas.', 'good');
+    state.justClosed = key;
+    toast('📦 '+escHtml(archive.label)+' clôturé — téléchargez son bilan en PDF dans l\'onglet Bilan.', 'good');
     ensureMonthSubscriptions();
     attachDerived();
     render();
@@ -2485,7 +2510,7 @@ function renderHistoryCard(){
   /* les bilans de fin de mois */
   h += '<div class="bilans-head" style="margin-top:14px;"><h3 style="font-size:14px;">🧾 Bilans de fin de mois</h3>'+
        (state.dl && H.length>1 ? '<button class="btn-mini" id="dlAllBilans">📄 Tout en PDF</button>' : '')+'</div>';
-  h += '<p class="pareto-sub">Enregistrés à chaque clôture et conservés ici. '+(state.dl?'Vous pouvez aussi les télécharger pour les garder sur votre téléphone ou les imprimer.':'')+'</p>';
+  h += '<p class="pareto-sub">Enregistrés à chaque clôture et conservés ici. '+(state.dl?'Ouvrez un mois puis « 📄 Télécharger en PDF » pour le ranger dans votre dossier Budget ou l\'imprimer.':'')+'</p>';
   H.forEach(function(m){
     var reconstitue = !(Array.isArray(m.bilan) && m.bilan.length);
     h += '<details class="hist-bilan"><summary>Bilan de '+escHtml(m.label||m._id)+(reconstitue?' <span class="muted">(recalculé)</span>':'')+'</summary>'+
@@ -2771,6 +2796,7 @@ function wireEvents(){
       if(m) telechargerBilans([m], nomFichier(m.label||m._id));
     };
   });
+  var pbx = document.getElementById('pdfBannerX'); if(pbx) pbx.onclick = function(){ state.justClosed = null; render(); };
   Array.prototype.forEach.call(document.querySelectorAll('[data-dlpdf]'), function(b){
     b.onclick = function(){
       var m = state.history.find(function(x){ return x._id===b.getAttribute('data-dlpdf'); });
