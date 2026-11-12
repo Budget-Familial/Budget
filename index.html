@@ -274,6 +274,8 @@
   .chk-jour{display:inline-flex; align-items:center; gap:3px; font-size:11.5px; color:var(--ink-muted); flex:0 0 auto;}
   .chk-jour .num-input{width:38px; padding:3px 4px; text-align:center;}
   select.sugg{outline:2px solid var(--good); outline-offset:1px;}
+  .dep-fold{margin-top:12px;} .dep-fold > details.sec{border-top:1px solid var(--line); padding-top:10px;}
+  .dep-fold .dep-search{margin-top:0;}
   .dep-search{margin-top:12px;} .dep-search .text-input{width:100%;}
   .search-all{font-size:12.5px; color:var(--ink-2); margin-top:8px;}
   .search-res{margin-top:8px; border:1px solid var(--border); border-radius:12px; background:var(--surface); padding:8px 10px; display:flex; flex-direction:column; gap:4px;}
@@ -300,6 +302,9 @@
   .itxt em{display:block; font-style:normal; font-size:12px; color:var(--ink-muted); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .iamt{flex:0 0 auto; font-weight:750; font-size:15px; font-variant-numeric:tabular-nums; text-align:right;}
   .iamt small{display:block; font-size:11px; font-weight:600;} .iamt small.ok{color:var(--good);} .iamt small.ko{color:var(--warning);}
+  .itxt em.obj{color:var(--ink-2); font-weight:600; white-space:normal;}
+  .obj-bar{display:block; height:5px; border-radius:100px; background:var(--line); margin-top:5px; overflow:hidden; max-width:220px;}
+  .obj-bar i{display:block; height:100%; border-radius:100px;}
   .ichev{flex:0 0 auto; color:var(--ink-muted); font-size:20px; line-height:1; transition:transform .15s;}
   .irow.on .ichev{transform:rotate(90deg); color:var(--accent);}
   .ilist .pl-det{border:0; border-top:1px solid var(--line); border-radius:0; margin:0; background:var(--surface); padding:12px 14px;}
@@ -1931,6 +1936,8 @@ function renderAchatsCard(){
   h += '</div>';
   if(remb) h += '<p class="hint-line">Choisissez le poste de la dépense remboursée (Santé pour la Sécu ou la mutuelle, Loisirs si un ami vous rembourse un resto…). Le remboursement se déduit de ce poste et l\'argent revient sur le compte ou en espèces.</p>';
 
+  /* la liste des dépenses saisies : repliée par défaut, la saisie reste toujours visible */
+  var hListe = h; h = '';
   /* recherche */
   var q = normLib(state.depQ||'');
   h += '<div class="dep-search"><input class="text-input" id="depQ" type="search" autocomplete="off" value="'+escapeAttr(state.depQ||'')+'" placeholder="🔍 Rechercher une dépense (ex. Amazon)"></div>';
@@ -1996,6 +2003,8 @@ function renderAchatsCard(){
     });
     h += '</div>';
   }
+  var totMois = d.achats.reduce(function(s2,a){ return s2+(+a.montant||0); },0);
+  h = hListe + '<div class="dep-fold">'+sec('deplist', !!(state.depQ), '🧾 Dépenses saisies <span class="sec-count">'+d.achats.length+'</span><span class="sec-amt">'+eur(totMois)+'</span>', h)+'</div>';
   h += '</div>';
   return h;
 }
@@ -2017,7 +2026,7 @@ function placementsCard(cat){
   var h = '<div class="card"><h3>'+(inv?'📈 Investissements':'🐷 Épargne')+' <span class="count">('+E.length+')</span> '+aideBtn('pl-'+cat)+'</h3>';
   h += aideTxt('pl-'+cat, inv
     ? 'Le montant = tout ce que vous y avez mis. Il augmente tout seul quand vous notez un versement (onglet Mois → « Épargne du mois »). Touchez › pour la plateforme et le type.'
-    : 'Le solde augmente tout seul quand vous notez un versement (onglet Mois → « Épargne du mois »). Si votre banque affiche un autre montant (intérêts…), corrigez-le ici. Touchez › pour la banque et le type.');
+    : 'Le solde augmente tout seul quand vous notez un versement (onglet Mois → « Épargne du mois »). Si votre banque affiche un autre montant (intérêts…), corrigez-le ici. Touchez une ligne pour l\'endroit (banque, maison…), le type et un objectif à atteindre.');
   /* deux chiffres, pas plus */
   var total = inv ? investSum() : (et.hasTotal ? et.total : 0);
   h += '<div class="ep-stats">';
@@ -2043,7 +2052,9 @@ function placementsCard(cat){
       }
       h += '<div class="irow-wrap'+(open?' open':'')+'"><button type="button" class="irow'+(open?' on':'')+'" data-epopen="'+e.id+'">'+
         '<i class="dot" style="background:'+kindColor(e.kind)+';"></i>'+
-        '<span class="itxt"><b>'+escHtml(e.label||'Sans nom')+'</b>'+(sous?'<em>'+escHtml(sous)+'</em>':'')+'</span>'+
+        '<span class="itxt"><b>'+escHtml(e.label||'Sans nom')+'</b>'+(sous?'<em>'+escHtml(sous)+'</em>':'')+
+        ((+e.objectif||0)>0 ? (function(){ var pc = Math.max(0, Math.min(100, (v||0)/(+e.objectif)*100)); return '<em class="obj">🎯 '+Math.round(pc)+' % de '+eur0(+e.objectif)+((v||0)>=+e.objectif?' — atteint 🎉':' · reste '+eur0(+e.objectif-(v||0)))+'</em><span class="obj-bar"><i style="width:'+pc+'%;background:'+kindColor(e.kind)+';"></i></span>'; })() : '')+
+        '</span>'+
         '<span class="iamt">'+(v!=null?eur(v):'—')+'</span><span class="ichev">›</span></button>';
       if(open){
         var verse = epVerse(e), H = (e.histo||[]).slice().sort(function(a2,b2){ return String(a2.mois).localeCompare(String(b2.mois)); }), dernier = H.length ? H[H.length-1] : null;
@@ -2052,7 +2063,8 @@ function placementsCard(cat){
         h += inv
           ? '<label><span>Montant investi</span><input type="text" inputmode="decimal" autocomplete="off" class="num-input" style="text-align:right;" data-einvesti="'+e.id+'" value="'+numStrOrEmpty(v)+'" placeholder="Montant"></label>'
           : '<label><span>Solde</span><input type="text" inputmode="decimal" autocomplete="off" class="num-input" style="text-align:right;" data-efin="'+e.id+'" value="'+numStrOrEmpty(v)+'" placeholder="Solde"></label>';
-        h += '<label><span>'+(inv?'Plateforme':'Banque')+'</span><input class="text-input" data-eplat="'+e.id+'" value="'+escapeAttr(e.plateforme)+'" placeholder="'+(inv?'ex. Trade Republic':'ex. Crédit Agricole')+'"></label>';
+        h += '<label><span>'+(inv?'Plateforme':'Où ?')+'</span><input class="text-input" data-eplat="'+e.id+'" value="'+escapeAttr(e.plateforme)+'" placeholder="'+(inv?'ex. Trade Republic':'ex. Crédit Agricole, à la maison…')+'"></label>';
+        h += '<label><span>Objectif</span><input type="text" inputmode="decimal" autocomplete="off" class="num-input" style="text-align:right;" data-eobj="'+e.id+'" value="'+numStrOrEmpty(isSet(e.objectif)&&+e.objectif>0?+e.objectif:null)+'" placeholder="facultatif, ex. 3000"></label>';
         h += '<label><span>Type</span><select class="chip-select" data-ekind="'+e.id+'">'+kindOptions(e.kind, cat)+'</select></label>';
         h += '<div class="pl-info"><span>'+(inv?'Investi ce mois':'Versé ce mois')+'</span><b>'+(verse>=0?'':'−')+eur(Math.abs(verse))+'</b></div>';
         if(dernier && isSet(inv ? dernier.investi : dernier.valeur)) h += '<div class="pl-info"><span>Fin '+escHtml(moisCourt(dernier.mois))+'</span><b>'+eur(+(inv ? dernier.investi : dernier.valeur))+'</b></div>';
@@ -2764,8 +2776,11 @@ function wireEvents(){
     dt.addEventListener('toggle', function(){
       var id = dt.getAttribute('data-sec'), def = dt.getAttribute('data-def')==='1';
       state.sec = state.sec || {};
+      var avant = secOpen(id, def);
       if(dt.open===def) delete state.sec[id]; else state.sec[id] = dt.open;
       try{ localStorage.setItem('bc_sec', JSON.stringify(state.sec)); }catch(e){}
+      /* la page a pu être redessinée entre le toucher et cet événement : on la remet d'aplomb */
+      if(!dt.isConnected && avant!==secOpen(id, def)) requestRender();
     });
   });
   Array.prototype.forEach.call(document.querySelectorAll('[data-nature]'), function(b){
@@ -2977,6 +2992,7 @@ function wireEvents(){
   });
   bindInput('data-elabel','epargnes','label',false,false);
   bindInput('data-eplat','epargnes','plateforme',false,false);
+  bindInput('data-eobj','epargnes','objectif','nullable',false);
   bindInput('data-edebut','epargnes','debut','nullable',false);
   bindInput('data-efin','epargnes','finOverride','nullable',false);
   /* total investi : on saisit le total à date ; on garde en mémoire la part
